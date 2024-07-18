@@ -2,9 +2,9 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 # 读取CSV文件
-csv_file_path1 = 'D:\\DeepLearning\\bird_activity_detection\\labels\\ff1010bird.csv'
+csv_file_path1 = 'sound/ff1010bird.csv'
 df1 = pd.read_csv(csv_file_path1)
-csv_file_path2 = 'D:\\DeepLearning\\bird_activity_detection\\labels\\warblrb10k.csv'
+csv_file_path2 = 'sound/warblrb10k.csv'
 df2 = pd.read_csv(csv_file_path2)
 
 # 筛选数据

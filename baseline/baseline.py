@@ -205,14 +205,14 @@ def run(iRepeat,savepath):
     # 创建训练集和测试集的自定义数据集对象
 
     training_dataset_ff = AudioDataset(training_df1,
-                                       data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
+                                       data_folder1='sound/ff1010bird')
     valid_dataset_ff = AudioDataset(valid_df1,
-                                    data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
+                                    data_folder1='sound/ff1010bird')
     test_dataset_ff = AudioDataset(test_df1,
-                                   data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
+                                   data_folder1='sound/ff1010bird')
 
     test_dataset_warb = AudioDataset(test_df2,
-                                     data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\warblrb10k')
+                                     data_folder1='sound/warblrb10k')
     print(training_dataset_ff.__len__())
 
     batch_size = 64
