@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 # import torchaudio
 import torchaudio.transforms as T
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import numpy as np
 import torch
 import torch.optim as optim
@@ -14,27 +14,9 @@ import torch.optim as optim
 # from torch.utils.data.dataset import ConcatDataset
 from tqdm import tqdm
 
-from Evaluate import train, valid, eval_acc, eval_auc
+from TS_PS2.Evaluate import train, valid, eval_acc, eval_auc
 from utils import make_sure_path_exists, show_f1score, show_loss
 
-# 读取CSV文件
-csv_file_path1 = 'D:\\CRT_code\\bird_sound\\ff1010bird.csv'
-df1 = pd.read_csv(csv_file_path1)
-csv_file_path2 = 'D:\\CRT_code\\bird_sound\\warblrb10k.csv'
-df2 = pd.read_csv(csv_file_path2)
-# csv_file_path3 = './my_index/BirdVoxDCASE20k_csvpublic.csv'
-# df3 = pd.read_csv(csv_file_path3)
-df1P = df1[df1['hasbird'] == 1]
-df1N = df1[df1['hasbird'] == 0].sample(n=2000)
-df2P = df2[df2['hasbird'] == 1].sample(n=2000)
-df2N = df2[df2['hasbird'] == 0]
-df1_2k = pd.merge(df1P, df1N, how='outer')
-df2_2k = pd.merge(df2P, df2N, how='outer')
-# 划分数据集
-train_df1, test_df1 = train_test_split(df1_2k, test_size=0.3, shuffle=True, random_state=42)
-training_df1, valid_df1 = train_test_split(train_df1, test_size=0.3, shuffle=True, random_state=42)
-
-train_df2, test_df2 = train_test_split(df2_2k, test_size=0.3, shuffle=True, random_state=42)
 
 
 # train_df3, test_df3 = train_test_split(df3, test_size=0.5, shuffle=True, random_state=42)
@@ -47,17 +29,26 @@ def specaug(data, targets):
         frequency_masking = T.FrequencyMasking(freq_mask_param=10)
         data[i] = time_masking(frequency_masking(data[i]))
     return data, targets
-
+def time_shift_spectrogram(spectrogram):
+    nb_shifts = np.random.randint(0, len(spectrogram)-1)
+    return np.roll(spectrogram, nb_shifts)
+def pitch_shift_spectrogram(y):
+    min_semitones = -1.0
+    max_semitones = 1.0
+    semitones = np.random.uniform(min_semitones, max_semitones)
+    y_shifted = librosa.effects.pitch_shift(y,sr=20500, n_steps=semitones)
+    return y_shifted
 
 # 定义自定义数据集类
 class AudioDataset(Dataset):
-    def __init__(self, dataframe1, data_folder1, sr=22050, dimension=220500):
+    def __init__(self, dataframe1,istrain, data_folder1, sr=22050, dimension=220500):
         self.dataframe1 = dataframe1
         # self.dataframe2 = dataframe2
         self.data_folder1 = data_folder1
         # self.data_folder2 = data_folder2
         self.sr = sr
         self.dim = dimension
+        self.istrain=istrain
 
     def __getitem__(self, index):
         # print(self.data_folder1)
@@ -70,7 +61,11 @@ class AudioDataset(Dataset):
             wb_wav = wb_wav[0: self.dim]
         else:
             wb_wav = np.pad(wb_wav, (0, self.dim - len(wb_wav)), "constant")
+        if (self.istrain == 1):
+            wb_wav = time_shift_spectrogram(wb_wav)
 
+        if (self.istrain == 2):
+            wb_wav = pitch_shift_spectrogram(wb_wav)
         # if (self.data_folder2 != ""):
         #     r2 = random.randint(0, len(self.dataframe2) - 1)
         #     filename2 = os.path.join(self.data_folder2, str(self.dataframe2.iloc[r2]['itemid']) + ".wav")
@@ -120,15 +115,6 @@ class AudioDataset(Dataset):
 
 
 
-# 创建训练集和测试集的自定义数据集对象
-
-
-training_dataset_ff = AudioDataset(training_df1, data_folder1='D:\\CRT_code\\bird_sound\\ff1010bird')
-valid_dataset_ff = AudioDataset(valid_df1, data_folder1='D:\\CRT_code\\bird_sound\\ff1010bird')
-test_dataset_ff = AudioDataset(test_df1, data_folder1='D:\\CRT_code\\bird_sound\\ff1010bird')
-
-test_dataset_warb = AudioDataset(test_df2, data_folder1='D:\\CRT_code\\bird_sound\\warblrb10k')
-print(training_dataset_ff.__len__())
 
 # 使用 DataLoader加载数据
 import torch.nn.functional as F
@@ -208,9 +194,42 @@ import logging
 # from sklearn.metrics import roc_auc_score
 
 # %%
-if __name__ == '__main__':
+def run(iRepeat,savepath):
+    csv_file_path1 = 'sound/ff1010bird.csv'
+    df1 = pd.read_csv(csv_file_path1)
+    csv_file_path2 = 'sound/warblrb10k.csv'
+    df2 = pd.read_csv(csv_file_path2)
+    # csv_file_path3 = './my_index/BirdVoxDCASE20k_csvpublic.csv'
+    # df3 = pd.read_csv(csv_file_path3)
+    df1P = df1[df1['hasbird'] == 1]
+    df1N = df1[df1['hasbird'] == 0].sample(n=2000)
+    df2P = df2[df2['hasbird'] == 1].sample(n=2000)
+    df2N = df2[df2['hasbird'] == 0]
+    df1_2k = pd.merge(df1P, df1N, how='outer')
+    df2_2k = pd.merge(df2P, df2N, how='outer')
+    # 划分数据集
+    training_df1 = pd.read_csv('dataset/train_f.csv')
+    test_df1 = pd.read_csv('dataset/test_f.csv')
+    valid_df1 = pd.read_csv('dataset/valid_f.csv')
 
-    iRepeat = 1
+    train_df2 = pd.read_csv('dataset/train_w.csv')
+    test_df2 = pd.read_csv('dataset/train_w.csv')
+    training_dataset_ff1 = AudioDataset(training_df1, data_folder1='sound/ff1010bird', istrain=2)
+    training_dataset_ff2 = AudioDataset(training_df1, data_folder1='sound/ff1010bird', istrain=1)
+    training_dataset_ff3 = AudioDataset(training_df1, data_folder1='sound/ff1010bird', istrain=0)
+    training_dataset_ff = ConcatDataset([training_dataset_ff1, training_dataset_ff2, training_dataset_ff3])
+    valid_dataset_ff = AudioDataset(valid_df1,
+                                    data_folder1='sound/ff1010bird',
+                                    istrain=0)
+    test_dataset_ff = AudioDataset(test_df1,
+                                   data_folder1='sound/ff1010bird',
+                                   istrain=0)
+
+    test_dataset_warb = AudioDataset(test_df2,
+                                     data_folder1='sound/warblrb10k',
+                                     istrain=0)
+
+    print(training_dataset_ff.__len__())
 
     batch_size = 64
 
@@ -250,9 +269,9 @@ if __name__ == '__main__':
         print("No checkpoint found. Starting training from the beginning.")
 
     # %% Training loop
-    save_folder_final = os.path.join('1102', 'repeat_' + str(iRepeat))
+    save_folder_final = os.path.join(savepath, 'repeat_' + str(iRepeat))
     make_sure_path_exists(save_folder_final)
-    log_file_path = save_folder_final + '/log_CI-Mix.txt'
+    log_file_path = save_folder_final + '/log_ts_ps2.txt'
     logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     training_f1_list, valid_f1_list = [], []
     training_loss_list, valid_loss_list = [], []

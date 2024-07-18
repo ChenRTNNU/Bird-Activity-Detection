@@ -14,27 +14,11 @@ import torch.optim as optim
 # from torch.utils.data.dataset import ConcatDataset
 from tqdm import tqdm
 
-from Evaluate import train, valid, eval_acc, eval_auc
+from baseline.Evaluate import train, valid, eval_acc, eval_auc
 from utils import make_sure_path_exists, show_f1score, show_loss
 
 # 读取CSV文件
-csv_file_path1 = 'D:\\DeepLearning\\bird_activity_detection\\labels\\ff1010bird.csv'
-df1 = pd.read_csv(csv_file_path1)
-csv_file_path2 = 'D:\\DeepLearning\\bird_activity_detection\\labels\\warblrb10k.csv'
-df2 = pd.read_csv(csv_file_path2)
-# csv_file_path3 = './my_index/BirdVoxDCASE20k_csvpublic.csv'
-# df3 = pd.read_csv(csv_file_path3)
-df1P = df1[df1['hasbird'] == 1]
-df1N = df1[df1['hasbird'] == 0].sample(n=2000)
-df2P = df2[df2['hasbird'] == 1].sample(n=2000)
-df2N = df2[df2['hasbird'] == 0]
-df1_2k = pd.merge(df1P, df1N, how='outer')
-df2_2k = pd.merge(df2P, df2N, how='outer')
-# 划分数据集
-train_df1, test_df1 = train_test_split(df1_2k, test_size=0.3, shuffle=True, random_state=42)
-training_df1, valid_df1 = train_test_split(train_df1, test_size=0.3, shuffle=True, random_state=42)
 
-train_df2, test_df2 = train_test_split(df2_2k, test_size=0.3, shuffle=True, random_state=42)
 
 
 # train_df3, test_df3 = train_test_split(df3, test_size=0.5, shuffle=True, random_state=42)
@@ -119,19 +103,6 @@ class AudioDataset(Dataset):
         return len(self.dataframe1)
 
 
-base_data_folder1 = r'H:\Jie_data\Bird activity detection\ff1010bird_wav\wav'
-base_data_folder2 = r'H:\Jie_data\Bird activity detection\warblrb10k_public_wav\wav'
-
-# 创建训练集和测试集的自定义数据集对象
-
-
-training_dataset_ff = AudioDataset(training_df1, data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
-valid_dataset_ff = AudioDataset(valid_df1, data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
-test_dataset_ff = AudioDataset(test_df1, data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
-
-test_dataset_warb = AudioDataset(test_df2, data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\warblrb10k')
-print(training_dataset_ff.__len__())
-
 # 使用 DataLoader加载数据
 import torch.nn.functional as F
 import torch.nn as nn
@@ -210,16 +181,45 @@ import logging
 # from sklearn.metrics import roc_auc_score
 
 # %%
-if __name__ == '__main__':
+def run(iRepeat,savepath):
+    csv_file_path1 = 'sound/ff1010bird.csv'
+    df1 = pd.read_csv(csv_file_path1)
+    csv_file_path2 = 'sound/warblrb10k.csv'
+    df2 = pd.read_csv(csv_file_path2)
+    # csv_file_path3 = './my_index/BirdVoxDCASE20k_csvpublic.csv'
+    # df3 = pd.read_csv(csv_file_path3)
+    df1P = df1[df1['hasbird'] == 1]
+    df1N = df1[df1['hasbird'] == 0].sample(n=2000)
+    df2P = df2[df2['hasbird'] == 1].sample(n=2000)
+    df2N = df2[df2['hasbird'] == 0]
+    df1_2k = pd.merge(df1P, df1N, how='outer')
+    df2_2k = pd.merge(df2P, df2N, how='outer')
+    # 划分数据集
+    training_df1 = pd.read_csv('dataset/train_f.csv')
+    test_df1 = pd.read_csv('dataset/test_f.csv')
+    valid_df1 = pd.read_csv('dataset/valid_f.csv')
 
-    iRepeat = 0
+    train_df2 = pd.read_csv('dataset/train_w.csv')
+    test_df2 = pd.read_csv('dataset/train_w.csv')
+
+    # 创建训练集和测试集的自定义数据集对象
+
+    training_dataset_ff = AudioDataset(training_df1,
+                                       data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
+    valid_dataset_ff = AudioDataset(valid_df1,
+                                    data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
+    test_dataset_ff = AudioDataset(test_df1,
+                                   data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\ff1010bird')
+
+    test_dataset_warb = AudioDataset(test_df2,
+                                     data_folder1='D:\\DeepLearning\\bird_activity_detection\\audio\\warblrb10k')
+    print(training_dataset_ff.__len__())
 
     batch_size = 64
 
     training_loader_ff = DataLoader(training_dataset_ff, batch_size=batch_size, shuffle=True)
     valid_loader_ff = DataLoader(valid_dataset_ff, batch_size=batch_size, shuffle=True)
     test_loader_ff = DataLoader(test_dataset_ff, batch_size=batch_size, shuffle=True)
-
     test_loader_warb = DataLoader(test_dataset_warb, batch_size=batch_size, shuffle=False)
 
     # Instantiate the model
@@ -252,7 +252,7 @@ if __name__ == '__main__':
         print("No checkpoint found. Starting training from the beginning.")
 
     # %% Training loop
-    save_folder_final = os.path.join('1102', 'repeat_' + str(iRepeat))
+    save_folder_final = os.path.join(savepath, 'repeat_' + str(iRepeat))
     make_sure_path_exists(save_folder_final)
     log_file_path = save_folder_final + '/log_basline.txt'
     logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -285,8 +285,8 @@ if __name__ == '__main__':
             # torch.save(model, os.path.join(save_folder_final, f'model_{iRepeat}.bin'))
             print(f"Saved model checkpoint at ./model_{iRepeat}.pth")
             best_valid_f1 = valid_f1
-        logging.info(f'Epoch {epoch + 1}/{epochs}, Loss: {training_loss}')
-        logging.info(f'Epoch {epoch + 1}/{epochs}, Loss: {valid_loss}')
+        logging.info(f'Epoch {epoch + 1}/{epochs}, train_Loss: {training_loss}')
+        logging.info(f'Epoch {epoch + 1}/{epochs}, valid_Loss: {valid_loss}')
 
     # %% load test
     model = BirdSoundCNN()

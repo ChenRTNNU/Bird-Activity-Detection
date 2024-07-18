@@ -1,11 +1,11 @@
 import os
-import random
+# import random
 import librosa
 import pandas as pd
 from sklearn.model_selection import train_test_split
 # import torchaudio
 import torchaudio.transforms as T
-from torch.utils.data import Dataset, DataLoader, ConcatDataset
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import torch
 import torch.optim as optim
@@ -14,8 +14,12 @@ import torch.optim as optim
 # from torch.utils.data.dataset import ConcatDataset
 from tqdm import tqdm
 
-from TCDA.Evaluate import train, valid, eval_acc, eval_auc
+from TS_PS.Evaluate import train, valid, eval_acc, eval_auc
 from utils import make_sure_path_exists, show_f1score, show_loss
+
+
+
+# train_df3, test_df3 = train_test_split(df3, test_size=0.5, shuffle=True, random_state=42)
 
 
 def specaug(data, targets):
@@ -25,42 +29,55 @@ def specaug(data, targets):
         frequency_masking = T.FrequencyMasking(freq_mask_param=10)
         data[i] = time_masking(frequency_masking(data[i]))
     return data, targets
+def time_shift_spectrogram(spectrogram):
+    nb_shifts = np.random.randint(0, len(spectrogram)-1)
+    return np.roll(spectrogram, nb_shifts)
+def pitch_shift_spectrogram(y):
+    min_semitones = -1.0
+    max_semitones = 1.0
+    semitones = np.random.uniform(min_semitones, max_semitones)
+    y_shifted = librosa.effects.pitch_shift(y,sr=20500, n_steps=semitones)
+    return y_shifted
 
-def wav_synthesize(y1, y2):
-    r1 = random.uniform(0, 1)
-    r2 = random.randint(0, len(y1))
-    audio_dst = np.array(y1)  # 将y1转换为NumPy数组以便进行向量化操作
-    y2_length = len(y2)
-    indices = np.arange(r2, len(y1))
-    mask = (indices < y2_length + r2)
-    audio_dst[indices[mask]] += r1 * y2[indices[mask] - r2]
-    return audio_dst
 # 定义自定义数据集类
 class AudioDataset(Dataset):
-    def __init__(self, dataframe1, dataframe2, data_folder1,data_folder2, sr=22050, dimension=220500,):
+    def __init__(self, dataframe1,istrain, data_folder1, sr=22050, dimension=220500):
         self.dataframe1 = dataframe1
-        self.dataframe2 = dataframe2
+        # self.dataframe2 = dataframe2
         self.data_folder1 = data_folder1
-        self.data_folder2 = data_folder2
+        # self.data_folder2 = data_folder2
         self.sr = sr
         self.dim = dimension
+        self.istrain=istrain
 
     def __getitem__(self, index):
+        # print(self.data_folder1)
+        # print(str(self.dataframe1.iloc[index]['itemid']))
+        # filename1 = os.path.join(self.data_folder1[0], str(self.dataframe1.iloc[index]['itemid']) + ".wav")
         filename1 = os.path.join(self.data_folder1, str(self.dataframe1.iloc[index]['itemid']) + ".wav")
+        # print(filename1)
         wb_wav, _ = librosa.load(filename1, sr=self.sr)
         if len(wb_wav) >= self.dim:
             wb_wav = wb_wav[0: self.dim]
         else:
             wb_wav = np.pad(wb_wav, (0, self.dim - len(wb_wav)), "constant")
-        if(self.data_folder2!=""):
-            r2 = random.randint(0, len(self.dataframe2)-1)
-            filename2 = os.path.join(self.data_folder2, str(self.dataframe2.iloc[r2]['itemid']) + ".wav")
-            wb_s, _ = librosa.load(filename2, sr=self.sr)
-            if len(wb_s) >= self.dim:
-                wb_s = wb_s[0: self.dim]
-            else:
-                wb_s = np.pad(wb_s, (0, self.dim - len(wb_s)), "constant")
-            wb_wav=wav_synthesize(wb_wav,wb_s)
+        if (self.istrain==1):
+            wb_wav=time_shift_spectrogram(wb_wav)
+            wb_wav=pitch_shift_spectrogram(wb_wav)
+        # if (self.data_folder2 != ""):
+        #     r2 = random.randint(0, len(self.dataframe2) - 1)
+        #     filename2 = os.path.join(self.data_folder2, str(self.dataframe2.iloc[r2]['itemid']) + ".wav")
+        #     wb_s, _ = librosa.load(filename2, sr=self.sr)
+        #     if len(wb_s) >= self.dim:
+        #         wb_s = wb_s[0: self.dim]
+        #     else:
+        #         wb_s = np.pad(wb_s, (0, self.dim - len(wb_s)), "constant")
+        #     wb_wav = wav_synthesize(wb_wav, wb_s)
+
+        # wb_wav = add_noise(wb_wav)
+        # wb_wav = pitch_shift_spectrogram(wb_wav)
+        # wb_wav = time_shift_spectrogram(wb_wav)
+
         frame_length = 1024  # 46 ms frames
         hop_length = 315  # 14 ms hop size
         n_fft = frame_length
@@ -82,11 +99,13 @@ class AudioDataset(Dataset):
 
         # Convert to log scale
         wb_wav = librosa.power_to_db(abs(mel_spec), ref=np.max)
-        label = self.dataframe1.iloc[index]['hasbird']
         wb_wav_tensor = torch.tensor(wb_wav, dtype=torch.float32)
-        label_tensor = torch.tensor(label, dtype=torch.float32)
         wb_wav_tensor = wb_wav_tensor.transpose(0, 1)
         wb_wav_tensor = torch.unsqueeze(wb_wav_tensor, dim=0)
+
+        label = self.dataframe1.iloc[index]['hasbird']
+        label_tensor = torch.tensor(label, dtype=torch.float32)
+
         return wb_wav_tensor, label_tensor
 
     def __len__(self):
@@ -174,25 +193,18 @@ import logging
 
 # %%
 def run(iRepeat,savepath):
-
-    # 读取CSV文件
     csv_file_path1 = 'sound/ff1010bird.csv'
     df1 = pd.read_csv(csv_file_path1)
     csv_file_path2 = 'sound/warblrb10k.csv'
     df2 = pd.read_csv(csv_file_path2)
-    csv_file_path3 = 'sound/BirdVoxDCASE20k_csvpublic.csv'
-    df3 = pd.read_csv(csv_file_path3)
     # csv_file_path3 = './my_index/BirdVoxDCASE20k_csvpublic.csv'
     # df3 = pd.read_csv(csv_file_path3)
     df1P = df1[df1['hasbird'] == 1]
     df1N = df1[df1['hasbird'] == 0].sample(n=2000)
     df2P = df2[df2['hasbird'] == 1].sample(n=2000)
     df2N = df2[df2['hasbird'] == 0]
-    df3P = df3[df3['hasbird'] == 1].sample(n=2000)
-    df3N = df3[df3['hasbird'] == 0].sample(n=2000)
     df1_2k = pd.merge(df1P, df1N, how='outer')
     df2_2k = pd.merge(df2P, df2N, how='outer')
-    df3_2k = pd.merge(df3P, df3N, how='outer')
     # 划分数据集
     training_df1 = pd.read_csv('dataset/train_f.csv')
     test_df1 = pd.read_csv('dataset/test_f.csv')
@@ -200,42 +212,26 @@ def run(iRepeat,savepath):
 
     train_df2 = pd.read_csv('dataset/train_w.csv')
     test_df2 = pd.read_csv('dataset/train_w.csv')
-    train_df3, test_df3 = train_test_split(df3_2k, test_size=0.5, shuffle=True, random_state=42)
-    train_df1P = training_df1[training_df1['hasbird'] == 1]
-    train_df1N = training_df1[training_df1['hasbird'] == 0]
-    train_df3P = train_df3[train_df3['hasbird'] == 1]
-    train_df3N = train_df3[train_df3['hasbird'] == 0]
-    # train_df3, test_df3 = train_test_split(df3, test_size=0.5, shuffle=True, random_state=42)
 
-    # 创建训练集和测试集的自定义数据集对象
-    train_dataset_1PP = AudioDataset(train_df1P, train_df3P, data_folder1='sound/ff1010bird',
-                                     data_folder2='sound/BirdVox-DCASE-20k')
-    train_dataset_1PN = AudioDataset(train_df1P, train_df3N, data_folder1='sound/ff1010bird',
-                                     data_folder2='sound/BirdVox-DCASE-20k')
-    train_dataset_1NN = AudioDataset(train_df1N, train_df3N, data_folder1='sound/ff1010bird',
-                                     data_folder2='sound/BirdVox-DCASE-20k')
-    test_dataset_ff = AudioDataset(test_df1, test_df1, data_folder1='sound/ff1010bird',
-                                   data_folder2="")
-    # train_dataset_2 = AudioDataset(train_df2, data_folder1='autodl-tmp/warblrb10k')
-    test_dataset_warb = AudioDataset(test_df2, test_df2, data_folder1='sound/warblrb10k',
-                                     data_folder2="")
-    train_dataset_3PP = AudioDataset(train_df3P, train_df1P, data_folder1='sound/BirdVox-DCASE-20k',
-                                     data_folder2='sound/ff1010bird')
-    train_dataset_3PN = AudioDataset(train_df3P, train_df1N, data_folder1='sound/BirdVox-DCASE-20k',
-                                     data_folder2='sound/ff1010bird')
-    train_dataset_3NN = AudioDataset(train_df3N, train_df1N, data_folder1='sound/BirdVox-DCASE-20k',
-                                     data_folder2='sound/ff1010bird')
-    # test_dataset_3 = AudioDataset(test_df3,test_df3,data_folder1='autodl-tmp/BirdVox-DCASE-20k',data_folder2="")
-    valid_dataset_ff = AudioDataset(valid_df1, test_df2, data_folder1='sound/ff1010bird',
-                                    data_folder2="")
-    train_dataset = ConcatDataset(
-        [train_dataset_1PP, train_dataset_1PN, train_dataset_1NN, train_dataset_3PP, train_dataset_3PN,
-         train_dataset_3NN])
-    print(len(train_dataset))
+    training_dataset_ff = AudioDataset(training_df1,
+                                       data_folder1='sound/ff1010bird',
+                                       istrain=1)
+    valid_dataset_ff = AudioDataset(valid_df1,
+                                    data_folder1='sound/ff1010bird',
+                                    istrain=0)
+    test_dataset_ff = AudioDataset(test_df1,
+                                   data_folder1='sound/ff1010bird',
+                                   istrain=0)
+
+    test_dataset_warb = AudioDataset(test_df2,
+                                     data_folder1='sound/warblrb10k',
+                                     istrain=0)
+
+    print(training_dataset_ff.__len__())
 
     batch_size = 64
 
-    training_loader_ff = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    training_loader_ff = DataLoader(training_dataset_ff, batch_size=batch_size, shuffle=True)
     valid_loader_ff = DataLoader(valid_dataset_ff, batch_size=batch_size, shuffle=True)
     test_loader_ff = DataLoader(test_dataset_ff, batch_size=batch_size, shuffle=True)
 
@@ -273,7 +269,7 @@ def run(iRepeat,savepath):
     # %% Training loop
     save_folder_final = os.path.join(savepath, 'repeat_' + str(iRepeat))
     make_sure_path_exists(save_folder_final)
-    log_file_path = save_folder_final + '/log_TCDA.txt'
+    log_file_path = save_folder_final + '/log_ts_ps.txt'
     logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     training_f1_list, valid_f1_list = [], []
     training_loss_list, valid_loss_list = [], []
